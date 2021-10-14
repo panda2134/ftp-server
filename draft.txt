@@ -1,0 +1,17 @@
+// pasv port?
+
+  /* initialize pasv */
+  server->pasv_sock_fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (server->pasv_sock_fd == -1) {
+    perror("socket() of pasv_sock_fd"); exit(EXIT_FAILURE);
+  }
+  struct sockaddr_in pasv_addr;
+  pasv_addr.sin_family = AF_INET;
+  pasv_addr.sin_port = 0;
+  pasv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+  if (bind(server->pasv_sock_fd, &pasv_addr, sizeof(pasv_addr)) == -1) {
+    perror("bind() of pasv_sock_fd"); exit(EXIT_FAILURE);
+  }
+  if (listen(server->pasv_sock_fd, 10) == -1) {
+    perror("listen() of pasv_sock_fd"); exit(EXIT_FAILURE);
+  }
