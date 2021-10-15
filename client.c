@@ -11,7 +11,7 @@ void create_client(ftp_client_t* client, ftp_server_t* server) {
   memset(client, 0, sizeof(ftp_client_t));
   client->cntl_fd = client->data_fd
       = client->pasv_listen_fd = client->local_fd = -1;
-  client->state = S_CMD;
+  client->state = S_INIT;
   client->mode = M_UNKNOWN;
   client->server = server;
   strcpy(client->cwd, server->basepath);
@@ -43,6 +43,7 @@ void try_accept_pasv(ftp_client_t* client) {
   }
 }
 
+extern const char *VERB_STR[NUM_REQUEST_VERB];
 void update_client(ftp_client_t* client) {
   assert(client != NULL);
 
@@ -50,9 +51,14 @@ void update_client(ftp_client_t* client) {
   try_accept_pasv(client);
 
   switch (client->state) {
+    case S_INIT:
+      client->verb = INIT;
+      client->state = S_WORK_RESPONSE_0;
+      execute_command(client);
     case S_CMD:
       if (read_command_buf(client)) {
         parse_command(client);
+        fprintf(stderr, "Got command: %s %s\n", VERB_STR[client->verb], client->argument);
         client->state = S_WORK_RESPONSE_0;
         execute_command(client);
       }
@@ -61,6 +67,7 @@ void update_client(ftp_client_t* client) {
       execute_command(client);
       break;
   }
+  realpath(".", client->cwd);
   chdir(client->server->basepath);
   if (client->state == S_QUIT) {
     ftp_server_t *server = client->server;

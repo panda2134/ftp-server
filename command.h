@@ -3,14 +3,17 @@
 
 #include "client.h"
 
-typedef enum {
+typedef enum request_verb {
   QUIT, ABOR, SYST, PASV, PWD,
   USER, PASS, RETR, STOR, TYPE, PORT, MKD, CWD,
   LIST, RMD, RNFR, RNTO, DELE,
 
-  UNKNOWN_VERB,
+  UNKNOWN_VERB, INIT,
   NUM_REQUEST_VERB
 } request_verb;
+
+struct ftp_client_t;
+typedef struct ftp_client_t ftp_client_t;
 
 void quit_handler(ftp_client_t *client);
 void syst_handler(ftp_client_t *client);
@@ -29,22 +32,7 @@ void rnto_handler(ftp_client_t *client);
 void dele_handler(ftp_client_t *client);
 void retr_stor_handler(ftp_client_t *client);
 void unknown_handler(ftp_client_t *client);
-
-void (*VERB_HANDLER[NUM_REQUEST_VERB])(ftp_client_t *) = {
-    [QUIT] = quit_handler, [ABOR] = quit_handler, [SYST] = syst_handler,
-    [PASV] = pasv_handler, [PWD] = pwd_handler, [USER] = user_handler, [PASS] = pass_handler,
-    [RETR] = retr_stor_handler, [STOR] = retr_stor_handler, [TYPE] = type_handler, [PORT] = port_handler,
-    [MKD] = mkd_handler, [CWD] = cwd_handler, [LIST] = list_handler, [RMD] = rmd_handler,
-    [RNFR] = rnfr_handler, [RNTO] = rnto_handler, [DELE] = dele_handler,
-    [UNKNOWN_VERB] = unknown_handler
-};
-
-const char *VERB_STR[NUM_REQUEST_VERB] = {
-    [QUIT] = "QUIT", [ABOR] = "ABOR", [SYST] = "SYST", [PASV] = "PASV", [PWD] = "PWD",
-    [USER] = "USER", [PASS] = "PASS", [RETR] = "RETR", [STOR] = "STOR", [TYPE] = "TYPE",
-    [PORT] = "PORT", [MKD] = "MKD", [CWD] = "CWD", [LIST] = "LIST", [RMD] = "RMD",
-    [RNFR] = "RNFR", [RNTO] = "RNTO", [DELE] = "DELE", [UNKNOWN_VERB] = ""
-};
+void init_handler(ftp_client_t *client);
 
 /**
  * try to read more into the command buffer. If the part that was just read contains `\\r\\n`, the complete command
@@ -79,13 +67,13 @@ void execute_command(ftp_client_t *client);
  * @param str message
  * @param response_state switched onto the given state after copying to buf.
  */
-void prepare_cntl_message_write(ftp_client_t* client, const char* str, client_state response_state);
+void prepare_cntl_message_write(ftp_client_t* client, const char* str, int response_state);
 
 /**
  * Write response on control connection.
  * @return true if fully written
  * @param work_state switched onto the given state after copying to buf.
  */
-bool write_cntl_message(ftp_client_t* client, client_state work_state);
+bool write_cntl_message(ftp_client_t* client, int work_state);
 
 #endif

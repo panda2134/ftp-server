@@ -18,7 +18,7 @@ typedef struct ftp_server_t {
 } ftp_server_t;
 
 ftp_server_t* create_ftp_server(int cntl_port, const char* basepath);
-bool is_valid_path(ftp_server_t* server, const char* resolved_path);
+bool is_valid_path(ftp_server_t* server, const char* path);
 _Noreturn void server_loop(ftp_server_t* server);
 
 #endif

@@ -6,7 +6,7 @@
 #include <stdbool.h>
 #include <unistd.h>
 #include <dirent.h>
-#include <libgen.h>
+#include "utils.h"
 #include "server.h"
 
 ftp_server_t* create_ftp_server(int cntl_port, const char* basepath) {
@@ -25,9 +25,13 @@ ftp_server_t* create_ftp_server(int cntl_port, const char* basepath) {
     perror("socket() of cntl_listen_fd"); exit(EXIT_FAILURE);
   }
   struct sockaddr_in cntl_addr;
+  memset(&cntl_addr, 0, sizeof(cntl_addr));
+  struct sockaddr_in *first_addr = (struct sockaddr_in*) get_first_inet_addr_with_prefix("en");
   cntl_addr.sin_family = AF_INET;
-  cntl_addr.sin_port = cntl_port;
-  cntl_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+  cntl_addr.sin_port = htons(cntl_port);
+  cntl_addr.sin_addr.s_addr = first_addr->sin_addr.s_addr;
+  free(first_addr);
+
   if (bind(server->cntl_listen_fd, (struct sockaddr*)&cntl_addr, sizeof(cntl_addr)) == -1) {
     perror("bind() of cntl_listen_fd"); exit(EXIT_FAILURE);
   }
@@ -38,6 +42,8 @@ ftp_server_t* create_ftp_server(int cntl_port, const char* basepath) {
     perror("fcntl(): cannot set cntl_listen_fd to be nonblock"); exit(EXIT_FAILURE);
   }
 
+  fprintf(stderr, "Server listening at %s:%d.\n", inet_ntoa(cntl_addr.sin_addr), cntl_port);
+
   /* initialize epoll */
   server->epollfd = epoll_create1(0);
   if (server->epollfd == -1) {
@@ -45,26 +51,44 @@ ftp_server_t* create_ftp_server(int cntl_port, const char* basepath) {
   }
 
   /* add cntl_sock to epoll */
-  struct epoll_event ev;
-  ev.events = EPOLLIN;
-  ev.data.ptr = NULL;
-  if (epoll_ctl(server->epollfd, EPOLL_CTL_ADD, ev.data.fd, &ev) == -1) {
+  if (epoll_ctl(server->epollfd, EPOLL_CTL_ADD, server->cntl_listen_fd,
+                &(struct epoll_event){ .data.ptr = NULL, .events = EPOLLIN }) == -1) {
     perror("epoll_ctl for cntl_listen_fd"); exit(EXIT_FAILURE);
   }
 
   return server;
 }
 
-bool is_valid_path(ftp_server_t* server, const char* resolved_path) {
-  size_t basepath_len = strlen(server->basepath);
-  return strlen(resolved_path) >= strlen(server->basepath)
-    && memcmp(resolved_path, server->basepath, basepath_len) == 0;
+bool is_valid_path(ftp_server_t* server, const char* path) {
+  char basepath_buf[PATH_MAX], path_buf[PATH_MAX], path_buf_alt[PATH_MAX];
+  if (realpath(server->basepath, basepath_buf) == NULL) {
+    perror("resolving basepath in is_valid_path()");
+    return false;
+  }
+  if (realpath(path, path_buf) == NULL) {
+    // take away the last part, and try again...
+    if (errno != ENOENT) {
+      perror("resolving path in is_valid_path()");
+      return false;
+    }
+    ssize_t slash_position = 0;
+    for (int i = 0; path[i]; i++) {
+      if (path[i] == '/') slash_position = i;
+    }
+    memcpy(path_buf_alt, path, slash_position);
+    path_buf_alt[slash_position] = '\0';
+    if (realpath(path_buf_alt, path_buf) == NULL) {
+      perror("2nd resolving path in is_valid_path()");
+      return false;
+    }
+  }
+  return strncmp(basepath_buf, path_buf, strlen(basepath_buf)) == 0;
 }
 
 _Noreturn void server_loop(ftp_server_t* server) {
   while (true) {
       server->num_event = epoll_wait(server->epollfd, server->events, MAX_EVENTS, -1);
-      if (server->num_event == -1) {
+      if (server->num_event == -1 && errno != EINTR) { // for debugger compatibility
           perror("epoll_wait");
           exit(EXIT_FAILURE);
       }
@@ -88,14 +112,13 @@ _Noreturn void server_loop(ftp_server_t* server) {
           CONTINUE_IF_FAIL("fcntl")
 
           // STEP 3: use epoll to watch the socket
-          struct epoll_event ev;
-          ev.events = EPOLLIN; // at S_CMD, wait for reading command from client
-          ev.data.ptr = client;
           errno = 0;
-          epoll_ctl(server->epollfd, EPOLL_CTL_ADD, ev.data.fd, &ev);
+          epoll_ctl(server->epollfd, EPOLL_CTL_ADD, client->cntl_fd,
+                    &(struct epoll_event){ .data.ptr = client, .events = EPOLLIN });
           CONTINUE_IF_FAIL("epoll_ctl for incoming control connection")
 
           server->num_client++; // a new client is added.
+          update_client(client);
 #undef CONTINUE_IF_FAIL
         } else {
           ftp_client_t* client = server->events[i].data.ptr;

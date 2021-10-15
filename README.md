@@ -185,4 +185,9 @@ Note: CMD sets last_fail according to status code, and goto CMD.
               |
               V
              End
-      
+
+## Debugging 
+
+QUIT, ABOR, PASV, PWD,
+RETR, STOR, PORT, MKD, CWD,
+LIST, RMD, RNFR, RNTO, DELE,

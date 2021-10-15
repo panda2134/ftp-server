@@ -13,4 +13,12 @@
  */
 void encode_pwd(const char* pathname, char* dest, size_t* result_len);
 
+/**
+ * get the first ip address whose the device name starts with a given prefix.
+ * @param prefix the given prefix
+ * @return pointer to the required sockaddr, NULL if not found or an error occured
+ * @note the pointer returned is dynamically allocated, and should be freed with `free()` when no longer used.
+ */
+struct sockaddr* get_first_inet_addr_with_prefix(const char* prefix);
+
 #endif //FTP_SERVER_UTILS_H
