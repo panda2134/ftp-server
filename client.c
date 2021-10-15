@@ -24,7 +24,7 @@ void try_accept_pasv(ftp_client_t* client) {
   client->data_fd = accept(client->pasv_listen_fd,
                            (struct sockaddr*)&client->data_sockaddr,
                                &client->data_sockaddr_len);
-  if (errno) {
+  if (client->data_fd == -1) {
     if (errno != EAGAIN && errno != EWOULDBLOCK) {
       perror("accept() with pasv socket");
       client->data_fd = -1; /* ensure that data_fd is -1 */
@@ -32,6 +32,7 @@ void try_accept_pasv(ftp_client_t* client) {
       /* not an error; still waiting for a connection */
     }
   } else {
+    errno = 0;
     epoll_ctl(client->server->epollfd, EPOLL_CTL_ADD, client->data_fd,
               &(struct epoll_event){.data.ptr = client, .events = EPOLLIN});
     if (errno) {
@@ -64,12 +65,20 @@ void update_client(ftp_client_t* client) {
   if (client->state == S_QUIT) {
     ftp_server_t *server = client->server;
     if (client->cntl_fd >= 0) {
-      epoll_ctl(server->epollfd, EPOLL_CTL_DEL, client->cntl_fd, NULL);
-      close(client->cntl_fd);
+      if (epoll_ctl(server->epollfd, EPOLL_CTL_DEL, client->cntl_fd, NULL) == -1) {
+        perror("epoll_ctl() on cntl_fd in S_QUIT");
+      }
+      if (close(client->cntl_fd) == -1) {
+        perror("close() on cntl_fd in S_QUIT");
+      }
     }
     if (client->data_fd >= 0) {
-      epoll_ctl(server->epollfd, EPOLL_CTL_DEL, client->data_fd, NULL);
-      close(client->data_fd);
+      if (epoll_ctl(server->epollfd, EPOLL_CTL_DEL, client->data_fd, NULL)) {
+        perror("epoll_ctl() on data_fd in S_QUIT");
+      }
+      if (close(client->data_fd) == -1) {
+        perror("close() on data_fd in S_QUIT");
+      }
     }
     free(client);
     server->num_client--;

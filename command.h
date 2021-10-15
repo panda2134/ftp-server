@@ -18,8 +18,6 @@ void pasv_handler(ftp_client_t *client);
 void pwd_handler(ftp_client_t *client);
 void user_handler(ftp_client_t *client);
 void pass_handler(ftp_client_t *client);
-void retr_handler(ftp_client_t *client);
-void stor_handler(ftp_client_t *client);
 void type_handler(ftp_client_t *client);
 void port_handler(ftp_client_t *client);
 void mkd_handler(ftp_client_t *client);
@@ -29,12 +27,13 @@ void rmd_handler(ftp_client_t *client);
 void rnfr_handler(ftp_client_t *client);
 void rnto_handler(ftp_client_t *client);
 void dele_handler(ftp_client_t *client);
+void retr_stor_handler(ftp_client_t *client);
 void unknown_handler(ftp_client_t *client);
 
 void (*VERB_HANDLER[NUM_REQUEST_VERB])(ftp_client_t *) = {
     [QUIT] = quit_handler, [ABOR] = quit_handler, [SYST] = syst_handler,
     [PASV] = pasv_handler, [PWD] = pwd_handler, [USER] = user_handler, [PASS] = pass_handler,
-    [RETR] = retr_handler, [STOR] = stor_handler, [TYPE] = type_handler, [PORT] = port_handler,
+    [RETR] = retr_stor_handler, [STOR] = retr_stor_handler, [TYPE] = type_handler, [PORT] = port_handler,
     [MKD] = mkd_handler, [CWD] = cwd_handler, [LIST] = list_handler, [RMD] = rmd_handler,
     [RNFR] = rnfr_handler, [RNTO] = rnto_handler, [DELE] = dele_handler,
     [UNKNOWN_VERB] = unknown_handler

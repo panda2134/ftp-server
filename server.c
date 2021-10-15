@@ -14,8 +14,7 @@ ftp_server_t* create_ftp_server(int cntl_port, const char* basepath) {
   memset(server, 0, sizeof(ftp_server_t));
 
   /* initialize base path */
-  realpath(basepath, server->basepath);
-  if (errno) {
+  if (realpath(basepath, server->basepath) == NULL) {
     perror("Unable to open server root directory");
     exit(EXIT_FAILURE);
   }
@@ -77,12 +76,14 @@ _Noreturn void server_loop(ftp_server_t* server) {
 
 #define CONTINUE_IF_FAIL(msg) if (errno) { perror(msg); close(client->cntl_fd); free(client); continue; }
           // STEP 1: try to accept
+          errno = 0;
           client->cntl_fd = accept(server->cntl_listen_fd,
                                   (struct sockaddr*)&(client->cntl_sockaddr),
                                   &(client->cntl_sockaddr_len));
           CONTINUE_IF_FAIL("accept")
 
           // STEP 2: try to set non-blocking
+          errno = 0;
           fcntl(client->cntl_fd, F_SETFL, O_NONBLOCK);
           CONTINUE_IF_FAIL("fcntl")
 
@@ -90,6 +91,7 @@ _Noreturn void server_loop(ftp_server_t* server) {
           struct epoll_event ev;
           ev.events = EPOLLIN; // at S_CMD, wait for reading command from client
           ev.data.ptr = client;
+          errno = 0;
           epoll_ctl(server->epollfd, EPOLL_CTL_ADD, ev.data.fd, &ev);
           CONTINUE_IF_FAIL("epoll_ctl for incoming control connection")
 

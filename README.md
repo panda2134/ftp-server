@@ -109,49 +109,43 @@ Note: CMD sets last_fail according to status code, and goto CMD.
     - try writing the buf of cntl; on fully written, goto CMD
 - RETR:
   - WORK_RESPONSE_0:
-    - if mode is PASV, check if the data connection is made
-    - otherwise, generate message for PORT
-    - check fcntl
+    - check stat & generate message
   - RESPONSE_0:
     - send response and continue if all done
-    - on all done:
-      - if response is ok,
-        - if mode is PORT
-          - `connect()`
-          - epoll -> wait on writable
-          - goto WORK_DATA, and return
-        - else
-          - epoll -> wait on writable
-      - else:
-        - goto CMD
+    - on all done: goto WORK_DATA
   - WORK_DATA:
     - open file fd
+    - if mode is PORT
+      - `connect()`
+      - epoll -> wait on writable
+      - goto WORK_DATA, and return
+    - else
+      - check if client is connected
+      - epoll -> wait on writable
     - if fails, check close, make error response & goto RESPONSE_1 
   - DATA_SENDFILE:
     - try `sendfile()`, until done
-    - if done, close 2x data conn + unreg epoll & generate response & goto RESPONSE_1
-    - if error, close 2x data conn + unreg epoll, generate new response on cntl & goto RESPONSE_1
+    - if done, goto RESPONSE_1
   - RESPONSE_1
+    - close 2x data conn + unreg epoll & generate response &
     - send all response, on done, goto CMD
 - STOR:
   - WORK_RESPONSE_0:
-    - if mode is PASV, check if the data connection is made
-    - otherwise, generate message for PORT
-    - check fcntl
+    - check stat & generate message
   - RESPONSE_0:
     - send response and continue if all done
-    - on all done:
-      - if response is ok,
-        - if mode is PORT
-        - `connect()`
-        - epoll -> wait on read
-        - goto WORK_DATA, and return
-      - else:
-        - goto CMD
+    - on all done: goto WORK_DATA
   - WORK_DATA:
     - open file fd
-    - if fails, check close, make error response & goto RESPONSE_1 
-  - DATA_SENDFILE:
+    - if mode is PORT
+      - `connect()`
+      - epoll -> wait on writable
+      - goto WORK_DATA, and return
+    - else
+      - check if client is connected
+      - epoll -> wait on writable
+    - if fails, check close, make error response & goto RESPONSE_1
+  - DATA_BUF:
     - try read into buffer, write file, until done
     - if done, close 2x data conn + unreg epoll & generate response & goto RESPONSE_1
     - if error, close 2x data conn + unreg epoll, generate new response on cntl & goto RESPONSE_1
