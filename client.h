@@ -15,7 +15,7 @@ typedef enum {
 enum client_state {
   S_INIT, S_CMD,
   S_WORK_RESPONSE_0, S_RESPONSE_0,
-  S_WORK_DATA,
+  S_WORK_DATA_PRE, S_WORK_DATA,
   S_DATA_BUF, S_DATA_SENDFILE,
   S_RESPONSE_1,
   S_RESPONSE_END,

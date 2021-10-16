@@ -248,18 +248,18 @@ void pass_handler(ftp_client_t *client) {
 }
 
 void fs_generic_handler_with_argument(ftp_client_t *client, int fn(const char *)) {
-  char resolved_path[PATH_MAX];
+  char path_buf[PATH_MAX];
   switch (client->state) {
     case S_WORK_RESPONSE_0:
-      realpath(client->cwd, resolved_path);
-      strcat(resolved_path, "/");
-      strcat(resolved_path, client->argument);
-      if (!is_valid_path(client->server, resolved_path)) {
+      realpath(client->cwd, path_buf);
+      strcat(path_buf, "/");
+      strcat(path_buf, client->argument);
+      if (!is_valid_path(client->server, path_buf)) {
         prepare_cntl_message_write(client, "550 Path not allowed or malformed", S_RESPONSE_0);
         goto case_cleanup_cwd;
       }
       errno = 0;
-      fn(resolved_path);
+      fn(path_buf);
       if (errno) {
         char *message = malloc(BUF_SIZE);
         sprintf(message, "550 %s", strerror(errno));
@@ -294,8 +294,21 @@ void rmd_handler(ftp_client_t *client) {
   fs_generic_handler_with_argument(client, rmdir);
 }
 
+int delete_alt(const char *pathname) {
+  /* ensure that pathname doesn't name a directory before use. */
+  struct stat stat_info;
+  if (stat(pathname, &stat_info) == -1) {
+    return -1;
+  }
+  if (S_ISDIR(stat_info.st_mode)) {
+    errno = EISDIR;
+    return -1;
+  }
+  return unlink(pathname);
+}
+
 void dele_handler(ftp_client_t *client) {
-  fs_generic_handler_with_argument(client, remove);
+  fs_generic_handler_with_argument(client, unlink);
 }
 
 void pwd_handler(ftp_client_t *client) {
@@ -548,20 +561,33 @@ void list_handler(ftp_client_t *client) {
       prepare_cntl_message_write(client, message, S_RESPONSE_0);
       break;
     case S_RESPONSE_0:
-      write_cntl_message(client, S_WORK_DATA);
+      write_cntl_message(client, S_WORK_DATA_PRE);
       break;
-    case S_WORK_DATA:
+    case S_WORK_DATA_PRE:
       // connect to port if needed
       if (client->mode == M_PORT) {
-        if (connect(client->data_fd, (struct sockaddr*)&client->data_sockaddr, sizeof(struct sockaddr_in)) == -1 &&
-            errno != EINPROGRESS && errno != EALREADY) { // error!
-          // TODO: cannot ls with M_PORT
-          sprintf(message, "551 %s", strerror(errno));
+        errno = 0;
+        if (connect(client->data_fd, (struct sockaddr*)&client->data_sockaddr, sizeof(struct sockaddr_in)) == -1) {
+          if (errno != EINPROGRESS) {
+            sprintf(message, "551 %s", strerror(errno));
+            shutdown_all_data_connection(client);
+            prepare_cntl_message_write(client, message, S_RESPONSE_1);
+            break;
+          }
+        }
+        int ctl_ret = epoll_ctl(client->server->epollfd, EPOLL_CTL_ADD, client->data_fd,
+                                &(struct epoll_event){ .data.ptr = client, .events = EPOLLOUT });
+        if (ctl_ret == -1) {
+          perror("epoll_ctl() in LIST");
           shutdown_all_data_connection(client);
-          prepare_cntl_message_write(client, message, S_RESPONSE_1);
-          goto case_cleanup_list_work_data;
+          prepare_cntl_message_write(client, "551 Internal server error", S_RESPONSE_1);
+          break;
         }
       }
+      client->state = S_WORK_DATA;
+      execute_command(client);
+      break;
+    case S_WORK_DATA:
       errno = 0;
       client->cur_dir_ent = readdir(client->cur_dir_ptr);
       if (errno) {
@@ -656,7 +682,31 @@ void retr_stor_handler(ftp_client_t *client) {
     case_cleanup_work_response_0:
       break;
     case S_RESPONSE_0:
-      write_cntl_message(client, S_WORK_DATA);
+      write_cntl_message(client, S_WORK_DATA_PRE);
+      break;
+    case S_WORK_DATA_PRE:
+      // connect to port if needed
+      if (client->mode == M_PORT) {
+        errno = 0;
+        if (connect(client->data_fd, (struct sockaddr*)&client->data_sockaddr, sizeof(struct sockaddr_in)) == -1) {
+          if (errno != EINPROGRESS) {
+            sprintf(message, "551 %s", strerror(errno));
+            shutdown_all_data_connection(client);
+            prepare_cntl_message_write(client, message, S_RESPONSE_1);
+            break;
+          }
+        }
+        int ctl_ret = epoll_ctl(client->server->epollfd, EPOLL_CTL_ADD, client->data_fd,
+                                &(struct epoll_event){ .data.ptr = client, .events = EPOLLOUT });
+        if (ctl_ret == -1) {
+          perror("epoll_ctl() in LIST");
+          shutdown_all_data_connection(client);
+          prepare_cntl_message_write(client, "551 Internal server error", S_RESPONSE_1);
+          break;
+        }
+      }
+      client->state = S_WORK_DATA;
+      execute_command(client);
       break;
     case S_WORK_DATA:
       client->local_fd = open(client->argument,
@@ -666,38 +716,18 @@ void retr_stor_handler(ftp_client_t *client) {
         prepare_cntl_message_write(client, message, S_RESPONSE_1);
         goto case_cleanup_retr_work_data;
       }
-      if (client->mode == M_PORT) {
-        if (connect(client->data_fd, (struct sockaddr*)&client->data_sockaddr, client->data_sockaddr_len) == -1 &&
-          errno != EINPROGRESS && errno != EALREADY) { // error!
-
-          sprintf(message, "551 %s", strerror(errno));
-          shutdown_all_data_connection(client);
-          prepare_cntl_message_write(client, message, S_RESPONSE_1);
-          goto case_cleanup_retr_work_data;
-        } else {
-          errno = 0;
-          epoll_ctl(client->server->epollfd, EPOLL_CTL_ADD, client->data_fd,
-                    &(struct epoll_event){
-                            .data.ptr = client, .events = client->verb == RETR ? EPOLLOUT : EPOLLIN
-          });
-          if (errno) {
-            fprintf(stderr, "epoll_ctl in RETR/STOR: %s\n", strerror(errno));
-          }
-        }
-      } else { // PASV, should be already added
-        if (client->data_fd == -1) {
-          prepare_cntl_message_write(client, "425 No data connection", S_RESPONSE_1);
-          goto case_cleanup_retr_work_data;
-        }
-        errno = 0;
-        epoll_ctl(client->server->epollfd, EPOLL_CTL_MOD, client->data_fd,
-                  &(struct epoll_event){
-                          .data.ptr = client,
-                          .events = client->verb == RETR ? EPOLLOUT : EPOLLIN
-        });
-        if (errno) {
-          fprintf(stderr, "epoll_ctl in RETR: %s\n", strerror(errno));
-        }
+      if (client->data_fd == -1) {
+        prepare_cntl_message_write(client, "425 No data connection", S_RESPONSE_1);
+        goto case_cleanup_retr_work_data;
+      }
+      errno = 0;
+      epoll_ctl(client->server->epollfd, EPOLL_CTL_MOD, client->data_fd,
+                &(struct epoll_event){
+                        .data.ptr = client,
+                        .events = client->verb == RETR ? EPOLLOUT : EPOLLIN
+      });
+      if (errno) {
+        fprintf(stderr, "epoll_ctl in RETR: %s\n", strerror(errno));
       }
       if (client->verb == RETR) {
         client->data_bytes_written = 0;
