@@ -2,6 +2,14 @@
 // Created by panda2134 on 2021/10/15.
 //
 
+#include "server.h"
+#include "utils.h"
+#include <dirent.h>
+#include <unistd.h>
+#include <errno.h>
+#include <sys/fcntl.h>
+#include <sys/epoll.h>
+#include <sys/socket.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <ifaddrs.h>
@@ -70,4 +78,42 @@ char* eplf_line(const char* filename, struct stat *stat_info) {
   strcat(result, "\t");
   strcat(result, filename);
   return result;
+}
+
+bool is_valid_path(ftp_server_t *server, const char *path) {
+  char basepath_buf[PATH_MAX], path_buf[PATH_MAX], path_buf_alt[PATH_MAX];
+  if (realpath(server->basepath, basepath_buf) == NULL) {
+    perror("resolving basepath in is_valid_path()");
+    return false;
+  }
+  if (realpath(path, path_buf) == NULL) {
+    // take away the last part, and try again...
+    if (errno != ENOENT) {
+      perror("resolving path in is_valid_path()");
+      return false;
+    }
+    ssize_t slash_position = 0;
+    for (int i = 0; path[i]; i++) {
+      if (path[i] == '/') slash_position = i;
+    }
+    memcpy(path_buf_alt, path, slash_position);
+    path_buf_alt[slash_position] = '\0';
+    if (realpath(path_buf_alt, path_buf) == NULL) {
+      perror("2nd resolving path in is_valid_path()");
+      return false;
+    }
+  }
+  return strncmp(basepath_buf, path_buf, strlen(basepath_buf)) == 0;
+}
+
+const char * resolve_path_to_host(const char* basepath, const char* cwd, const char* pathname) {
+  static char buf[PATH_MAX];
+  if (pathname[0] == '/') {
+    strncpy(buf, basepath, PATH_MAX);
+  } else {
+    strncpy(buf, cwd, PATH_MAX);
+    strncat(buf, "/", PATH_MAX);
+  }
+  strncat(buf, pathname, PATH_MAX);
+  return buf;
 }

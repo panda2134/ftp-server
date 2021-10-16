@@ -65,32 +65,6 @@ ftp_server_t *create_ftp_server(int cntl_port, const char *basepath, const char 
   return server;
 }
 
-bool is_valid_path(ftp_server_t *server, const char *path) {
-  char basepath_buf[PATH_MAX], path_buf[PATH_MAX], path_buf_alt[PATH_MAX];
-  if (realpath(server->basepath, basepath_buf) == NULL) {
-    perror("resolving basepath in is_valid_path()");
-    return false;
-  }
-  if (realpath(path, path_buf) == NULL) {
-    // take away the last part, and try again...
-    if (errno != ENOENT) {
-      perror("resolving path in is_valid_path()");
-      return false;
-    }
-    ssize_t slash_position = 0;
-    for (int i = 0; path[i]; i++) {
-      if (path[i] == '/') slash_position = i;
-    }
-    memcpy(path_buf_alt, path, slash_position);
-    path_buf_alt[slash_position] = '\0';
-    if (realpath(path_buf_alt, path_buf) == NULL) {
-      perror("2nd resolving path in is_valid_path()");
-      return false;
-    }
-  }
-  return strncmp(basepath_buf, path_buf, strlen(basepath_buf)) == 0;
-}
-
 _Noreturn void server_loop(ftp_server_t *server) {
   while (true) {
     server->num_closed = 0;

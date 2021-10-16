@@ -1,6 +1,8 @@
 #include <unistd.h>
 #include <stdio.h>
-#include <string.h>
+#define __USE_GNU
+#define __GNU_SOURCE
+#include <string.h> // GNU version of basename()
 #include <stdbool.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -254,9 +256,7 @@ void fs_generic_handler_with_argument(ftp_client_t *client, int fn(const char *)
   char path_buf[PATH_MAX];
   switch (client->state) {
     case S_WORK_RESPONSE_0:
-      realpath(client->cwd, path_buf);
-      strcat(path_buf, "/");
-      strcat(path_buf, client->argument);
+      strncpy(path_buf, resolve_path_to_host(client->server->basepath, client->cwd, client->argument), PATH_MAX);
       if (!is_valid_path(client->server, path_buf)) {
         prepare_cntl_message_write(client, "550 Path not allowed or malformed.", S_RESPONSE_0);
         goto case_cleanup_cwd;
@@ -302,7 +302,7 @@ void cdup_handler(ftp_client_t *client) {
   switch (client->state) {
     case S_WORK_RESPONSE_0:
       realpath(client->cwd, path_buf);
-      strcat(path_buf, "/..");
+      strncat(path_buf, "/..", PATH_MAX);
       if (!is_valid_path(client->server, path_buf)) {
         prepare_cntl_message_write(client, "550 Path not allowed or malformed.", S_RESPONSE_0);
         goto case_cleanup_cwd;
@@ -341,7 +341,7 @@ int delete_alt(const char *pathname) {
 }
 
 void dele_handler(ftp_client_t *client) {
-  fs_generic_handler_with_argument(client, unlink);
+  fs_generic_handler_with_argument(client, delete_alt);
 }
 
 void pwd_handler(ftp_client_t *client) {
@@ -350,7 +350,7 @@ void pwd_handler(ftp_client_t *client) {
   switch (client->state) {
     case S_WORK_RESPONSE_0:
       strcpy(message, "257 ");
-      if (strcmp(client->server->basepath, client->cwd) != 0) {
+      if (strncmp(client->server->basepath, client->cwd, PATH_MAX) != 0) {
         realpath(client->cwd, buf);
         encode_pwd(buf + strlen(client->server->basepath), message + 4, &encoded_len); // "4" is for "257 "
       } else {
@@ -367,13 +367,11 @@ void pwd_handler(ftp_client_t *client) {
 
 void rnfr_handler(ftp_client_t *client) {
   struct stat stat_info;
-  char resolved_path[PATH_MAX];
+  char path_buf[PATH_MAX];
   switch (client->state) {
     case S_WORK_RESPONSE_0:
-      strcpy(resolved_path, client->cwd);
-      strcat(resolved_path, "/");
-      strcat(resolved_path, client->argument);
-      if (!is_valid_path(client->server, resolved_path)) {
+      strncpy(path_buf, resolve_path_to_host(client->server->basepath, client->cwd, client->argument), PATH_MAX);
+      if (!is_valid_path(client->server, path_buf)) {
         prepare_cntl_message_write(client, "550 Path not allowed or malformed.", S_RESPONSE_0);
         goto case_cleanup_rnfr;
       }
@@ -406,13 +404,13 @@ void rnto_handler(ftp_client_t *client) {
         break;
       }
 
-      realpath(client->cwd, path_buf_old);
-      strcat(path_buf_old, "/");
-      realpath(client->last_argument, path_buf_old);
+      strncpy(path_buf_old,
+              resolve_path_to_host(client->server->basepath, client->cwd, client->last_argument),
+              PATH_MAX);
 
-      realpath(client->cwd, path_buf_new);
-      strcat(path_buf_new, "/");
-      strcat(path_buf_new, client->argument);
+      strncpy(path_buf_new,
+              resolve_path_to_host(client->server->basepath, client->cwd, client->argument),
+              PATH_MAX);
       if (!is_valid_path(client->server, path_buf_new)) {
         prepare_cntl_message_write(client, "550 Path not allowed or malformed.", S_RESPONSE_0);
         goto case_cleanup_rnto;
@@ -593,9 +591,7 @@ void list_handler(ftp_client_t *client) {
   char target[BUF_SIZE], current_filename[FILENAME_SIZE], message[BUF_SIZE];
   switch (client->state) {
     case S_WORK_RESPONSE_0:
-      strcpy(target, client->cwd);
-      strcat(target, "/");
-      strcat(target, client->argument);
+      strncpy(target, resolve_path_to_host(client->server->basepath, client->cwd, client->argument), PATH_MAX);
       if (!is_valid_path(client->server, target)) {
         prepare_cntl_message_write(client, "550 Path not allowed or malformed.", S_RESPONSE_1);
       } else if (stat(target, &stat_info) == -1) {
@@ -671,17 +667,15 @@ void list_handler(ftp_client_t *client) {
         strcpy(current_filename, client->cur_dir_ent->d_name);
       } else {
         // only a file!
-        strcpy(current_filename, client->argument);
+        strncpy(current_filename, basename(client->argument), FILENAME_SIZE);
       }
 
       if (client->verb == LIST) {
-        strcpy(target, client->cwd);
-        strcat(target, "/");
+        strncpy(target, resolve_path_to_host(client->server->basepath, client->cwd, client->argument), PATH_MAX);
         if (client->cur_dir_ptr) {
-          strcat(target, client->argument);
-          strcat(target, "/");
+          strncat(target, "/", PATH_MAX);
+          strncat(target, current_filename, PATH_MAX);
         }
-        strcat(target, current_filename);
         if (stat(target, &stat_info) == -1) {
           perror("LIST/NLST at stat() of S_DATA_BUF");
           shutdown_all_data_connection(client);
@@ -744,17 +738,16 @@ void list_handler(ftp_client_t *client) {
 
 void retr_stor_handler(ftp_client_t *client) {
   struct stat stat_info;
-  char resolved_path[PATH_MAX], message[BUF_SIZE], read_buf[BUF_SIZE];
+  char path_buf[PATH_MAX], message[BUF_SIZE], read_buf[BUF_SIZE];
   switch (client->state) {
     case S_WORK_RESPONSE_0:
-      if (realpath(client->cwd, resolved_path) == NULL) {
+      if (realpath(client->cwd, path_buf) == NULL) {
         sprintf(message, "550 %s.", strerror(errno));
         prepare_cntl_message_write(client, message, S_RESPONSE_1);
         goto case_cleanup_work_response_0;
       }
-      strcat(resolved_path, "/");
-      strcat(resolved_path, client->argument);
-      if (!is_valid_path(client->server, resolved_path)) {
+      strncpy(path_buf, resolve_path_to_host(client->server->basepath, client->cwd, client->argument), PATH_MAX);
+      if (!is_valid_path(client->server, path_buf)) {
         prepare_cntl_message_write(client, "550 Path not allowed or malformed.", S_RESPONSE_1);
         goto case_cleanup_work_response_0;
       }
@@ -763,17 +756,17 @@ void retr_stor_handler(ftp_client_t *client) {
         goto case_cleanup_work_response_0;
       }
       if (client->verb == RETR) {
-        if (stat(resolved_path, &stat_info) == -1) {
+        if (stat(path_buf, &stat_info) == -1) {
           sprintf(message, "550 %s.", strerror(errno));
           prepare_cntl_message_write(client, message, S_RESPONSE_1);
         } else {
           sprintf(message, "150 Opening BINARY mode data connection for %s (%ld bytes).",
-                  resolved_path, stat_info.st_size);
+                  path_buf, stat_info.st_size);
           prepare_cntl_message_write(client, message, S_RESPONSE_0);
         }
       } else {
         sprintf(message, "150 Opening BINARY mode data connection for %s.",
-                resolved_path);
+                path_buf);
         prepare_cntl_message_write(client, message, S_RESPONSE_0);
       }
 
@@ -812,7 +805,13 @@ void retr_stor_handler(ftp_client_t *client) {
       execute_command(client);
       break;
     case S_WORK_DATA:
-      client->local_fd = open(client->argument,
+      if (realpath(client->cwd, path_buf) == NULL) {
+        sprintf(message, "551 %s.", strerror(errno));
+        prepare_cntl_message_write(client, message, S_RESPONSE_1);
+        goto case_cleanup_retr_work_data;
+      }
+      strncpy(path_buf, resolve_path_to_host(client->server->basepath, client->cwd, client->argument), PATH_MAX);
+      client->local_fd = open(path_buf,
                               client->verb == RETR ? O_RDONLY : O_CREAT | O_WRONLY, 0644);
       if (client->local_fd == -1) {
         sprintf(message, "551 %s.", strerror(errno));
