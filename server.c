@@ -24,15 +24,14 @@ ftp_server_t* create_ftp_server(int cntl_port, const char* basepath) {
   if (server->cntl_listen_fd == -1) {
     perror("socket() of cntl_listen_fd"); exit(EXIT_FAILURE);
   }
-  struct sockaddr_in cntl_addr;
-  memset(&cntl_addr, 0, sizeof(cntl_addr));
+  memset(&server->listen_addr, 0, sizeof(server->listen_addr));
   struct sockaddr_in *first_addr = (struct sockaddr_in*) get_first_inet_addr_with_prefix("en");
-  cntl_addr.sin_family = AF_INET;
-  cntl_addr.sin_port = htons(cntl_port);
-  cntl_addr.sin_addr.s_addr = first_addr->sin_addr.s_addr;
+  server->listen_addr.sin_family = AF_INET;
+  server->listen_addr.sin_port = htons(cntl_port);
+  server->listen_addr.sin_addr.s_addr = first_addr->sin_addr.s_addr;
   free(first_addr);
 
-  if (bind(server->cntl_listen_fd, (struct sockaddr*)&cntl_addr, sizeof(cntl_addr)) == -1) {
+  if (bind(server->cntl_listen_fd, (struct sockaddr*)&server->listen_addr, sizeof(server->listen_addr)) == -1) {
     perror("bind() of cntl_listen_fd"); exit(EXIT_FAILURE);
   }
   if (listen(server->cntl_listen_fd, MAX_CLIENT) == -1) {
@@ -42,7 +41,7 @@ ftp_server_t* create_ftp_server(int cntl_port, const char* basepath) {
     perror("fcntl(): cannot set cntl_listen_fd to be nonblock"); exit(EXIT_FAILURE);
   }
 
-  fprintf(stderr, "Server listening at %s:%d.\n", inet_ntoa(cntl_addr.sin_addr), cntl_port);
+  fprintf(stderr, "Server listening at %s:%d.\n", inet_ntoa(server->listen_addr.sin_addr), cntl_port);
 
   /* initialize epoll */
   server->epollfd = epoll_create1(0);

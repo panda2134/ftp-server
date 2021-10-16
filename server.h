@@ -14,6 +14,7 @@ typedef struct ftp_server_t {
   struct epoll_event events[MAX_EVENTS];
   int num_event, epollfd, cntl_listen_fd;
   int num_client;
+  struct sockaddr_in listen_addr;
   char basepath[PATH_MAX];
 } ftp_server_t;
 
