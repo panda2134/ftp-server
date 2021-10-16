@@ -7,6 +7,7 @@
 #define FILENAME_SIZE 256
 #define BUF_SIZE 8192 // only take last 8192 chars per request
 #define USERNAME_LENGTH 32
+#define INTERFACE_PREFIX "lo"
 
 #include <stdlib.h>
 #include <sys/types.h>

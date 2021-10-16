@@ -15,7 +15,7 @@ void (*VERB_HANDLER[NUM_REQUEST_VERB])(ftp_client_t *) = {
     [PASV] = pasv_handler, [PWD] = pwd_handler, [USER] = user_handler, [PASS] = pass_handler,
     [RETR] = retr_stor_handler, [STOR] = retr_stor_handler, [TYPE] = type_handler, [PORT] = port_handler,
     [MKD] = mkd_handler, [CWD] = cwd_handler, [LIST] = list_handler, [NLST] = list_handler, [RMD] = rmd_handler,
-    [RNFR] = rnfr_handler, [RNTO] = rnto_handler, [DELE] = dele_handler,
+    [RNFR] = rnfr_handler, [RNTO] = rnto_handler, [DELE] = dele_handler, [CDUP] = cdup_handler,
     [UNKNOWN_VERB] = unknown_handler, [INIT] = init_handler
 };
 
@@ -23,7 +23,7 @@ const char *VERB_STR[NUM_REQUEST_VERB] = {
     [QUIT] = "QUIT", [ABOR] = "ABOR", [SYST] = "SYST", [PASV] = "PASV", [PWD] = "PWD",
     [USER] = "USER", [PASS] = "PASS", [RETR] = "RETR", [STOR] = "STOR", [TYPE] = "TYPE",
     [PORT] = "PORT", [MKD] = "MKD", [CWD] = "CWD", [LIST] = "LIST", [NLST] = "NLST", [RMD] = "RMD",
-    [RNFR] = "RNFR", [RNTO] = "RNTO", [DELE] = "DELE", [UNKNOWN_VERB] = "", [INIT] = ""
+    [RNFR] = "RNFR", [RNTO] = "RNTO", [DELE] = "DELE", [CDUP] = "CDUP", [UNKNOWN_VERB] = "", [INIT] = ""
 };
 
 
@@ -43,6 +43,9 @@ bool read_command_buf(ftp_client_t *client) {
       if (errno != EAGAIN) {
         perror("Error reading command buffer");
       }
+      return false;
+    } else if (nbytes == 0) {
+      client->state = S_QUIT;
       return false;
     }
     ssize_t original_bytes_read = client->cntl_bytes_read;
@@ -208,11 +211,8 @@ void init_handler(ftp_client_t *client) {
 }
 
 void type_handler(ftp_client_t *client) {
-  if (strcmp(client->argument, "I") == 0) {
-    simple_response_handler(client, "200 Type set to I", S_RESPONSE_END);
-  } else {
-    simple_response_handler(client, "504 Unsupported type", S_RESPONSE_END);
-  }
+  /* treat all TYPE as setting to BINARY */
+  simple_response_handler(client, "200 Type set to I", S_RESPONSE_END);
 }
 
 void user_handler(ftp_client_t *client) {
@@ -294,6 +294,36 @@ void rmd_handler(ftp_client_t *client) {
   fs_generic_handler_with_argument(client, rmdir);
 }
 
+void cdup_handler(ftp_client_t *client) {
+  char path_buf[PATH_MAX];
+  switch (client->state) {
+    case S_WORK_RESPONSE_0:
+      realpath(client->cwd, path_buf);
+      strcat(path_buf, "/..");
+      if (!is_valid_path(client->server, path_buf)) {
+        prepare_cntl_message_write(client, "550 Path not allowed or malformed", S_RESPONSE_0);
+        goto case_cleanup_cwd;
+      }
+      errno = 0;
+      chdir(path_buf);
+      if (errno) {
+        char *message = malloc(BUF_SIZE);
+        sprintf(message, "550 %s", strerror(errno));
+        prepare_cntl_message_write(client, message, S_RESPONSE_0);
+        free(message);
+        goto case_cleanup_cwd;
+      }
+      prepare_cntl_message_write(client, "250 Okay", S_RESPONSE_0);
+
+    case_cleanup_cwd:
+      break;
+    case S_RESPONSE_0:
+      write_cntl_message(client, S_RESPONSE_END);
+      break;
+    DEFAULT_MEANS_INVALID_STATE("CDUP")
+  }
+}
+
 int delete_alt(const char *pathname) {
   /* ensure that pathname doesn't name a directory before use. */
   struct stat stat_info;
@@ -312,12 +342,17 @@ void dele_handler(ftp_client_t *client) {
 }
 
 void pwd_handler(ftp_client_t *client) {
-  char message[BUF_SIZE];
+  char buf[BUF_SIZE], message[BUF_SIZE];
   size_t encoded_len = 0u;
   switch (client->state) {
     case S_WORK_RESPONSE_0:
-      strcpy(message, "250 ");
-      encode_pwd(client->cwd, message + 4, &encoded_len); // "4" is for "250 "
+      strcpy(message, "257 ");
+      if (strcmp(client->server->basepath, client->cwd) != 0) {
+        realpath(client->cwd, buf);
+        encode_pwd(buf + strlen(client->server->basepath), message + 4, &encoded_len); // "4" is for "257 "
+      } else {
+        encode_pwd("/", message + 4, &encoded_len); // "4" is for "250 "
+      }
       prepare_cntl_message_write_alt(client, message, encoded_len + 4, S_RESPONSE_0);
       break;
     case S_RESPONSE_0:
@@ -537,7 +572,7 @@ void pasv_handler(ftp_client_t *client) {
 
     case_cleanup_pasv:
       if (!fail) {
-        sprintf(message, "227 =%u,%u,%u,%u,%u,%u", h1, h2, h3, h4, p1, p2);
+        sprintf(message, "227 Entering Passive Mode (%u,%u,%u,%u,%u,%u).", h1, h2, h3, h4, p1, p2);
       } else {
         strcpy(message, "550 Failed to create socket");
       }
@@ -552,17 +587,17 @@ void pasv_handler(ftp_client_t *client) {
 
 void list_handler(ftp_client_t *client) {
   struct stat stat_info;
-  char target[BUF_SIZE], message[BUF_SIZE];
+  char target[BUF_SIZE], current_filename[FILENAME_SIZE], message[BUF_SIZE];
   switch (client->state) {
     case S_WORK_RESPONSE_0:
       strcpy(target, client->cwd);
       strcat(target, "/");
       strcat(target, client->argument);
-      if (stat(target, &stat_info) == -1) {
+      if (!is_valid_path(client->server, target)) {
+        prepare_cntl_message_write(client, "550 Path not allowed or malformed", S_RESPONSE_1);
+      } else if (stat(target, &stat_info) == -1) {
         sprintf(message, "550 %s", strerror(errno));
         prepare_cntl_message_write(client, message, S_RESPONSE_1);
-      } else if (!is_valid_path(client->server, target)) {
-        prepare_cntl_message_write(client, "550 Path not allowed or malformed", S_RESPONSE_1);
       } else if (client->mode == M_UNKNOWN) {
         prepare_cntl_message_write(client, "425 No data connection", S_RESPONSE_1);
       } else {
@@ -598,6 +633,8 @@ void list_handler(ftp_client_t *client) {
           prepare_cntl_message_write(client, "551 Internal server error", S_RESPONSE_1);
           break;
         }
+      } else {
+        if (client->data_fd == -1) break; // stay in this state
       }
       client->state = S_WORK_DATA;
       execute_command(client);
@@ -605,34 +642,59 @@ void list_handler(ftp_client_t *client) {
     case S_WORK_DATA:
       errno = 0;
       if (client->cur_dir_ptr) {
-        client->cur_dir_ent = readdir(client->cur_dir_ptr);
+        while (true) {
+          client->cur_dir_ent = readdir(client->cur_dir_ptr);
+          if (client->cur_dir_ent != NULL &&
+            (strcmp(".", client->cur_dir_ent->d_name) == 0 || strcmp("..", client->cur_dir_ent->d_name) == 0)
+            ) {
+            continue;
+          } else {
+            break;
+          }
+        }
         if (errno) {
           perror("LIST/NLST at S_DATA_BUF");
           shutdown_all_data_connection(client);
           prepare_cntl_message_write(client, "451 Failed to list current directory",
                                      S_RESPONSE_1);
           goto case_cleanup_list_work_data;
-        } else {
-          if (client->cur_dir_ent == NULL) {
-            shutdown_all_data_connection(client);
-            prepare_cntl_message_write(client, "226 Successfully listed contents",
-                                       S_RESPONSE_1);
-            goto case_cleanup_list_work_data;
-          } else {
-            strcpy(client->data_write_buf, client->cur_dir_ent->d_name);
-            strcat(client->data_write_buf, "\r\n");
-            client->data_bytes_written = 0u;
-            client->data_bytes_to_write = strlen(client->data_write_buf);
-          }
         }
+        if (client->cur_dir_ent == NULL) {
+          shutdown_all_data_connection(client);
+          prepare_cntl_message_write(client, "226 Successfully listed contents",
+                                     S_RESPONSE_1);
+          goto case_cleanup_list_work_data;
+        }
+        strcpy(current_filename, client->cur_dir_ent->d_name);
       } else {
         // only a file!
-        strcpy(client->data_write_buf, client->argument);
-        strcat(client->data_write_buf, "\r\n");
-        client->data_bytes_written = 0u;
-        client->data_bytes_to_write = strlen(client->data_write_buf);
+        strcpy(current_filename, client->argument);
       }
 
+      if (client->verb == LIST) {
+        strcpy(target, client->cwd);
+        strcat(target, "/");
+        if (client->cur_dir_ptr) {
+          strcat(target, client->argument);
+          strcat(target, "/");
+        }
+        strcat(target, current_filename);
+        if (stat(target, &stat_info) == -1) {
+          perror("LIST/NLST at stat() of S_DATA_BUF");
+          shutdown_all_data_connection(client);
+          prepare_cntl_message_write(client, "451 Failed to list current directory",
+                                     S_RESPONSE_1);
+          goto case_cleanup_list_work_data;
+        }
+        strcpy(client->data_write_buf, eplf_line(current_filename, &stat_info));
+        strcat(client->data_write_buf, "\r\n");
+      } else {
+        strcpy(client->data_write_buf, current_filename);
+        strcat(client->data_write_buf, "\r\n");
+      }
+
+      client->data_bytes_written = 0u;
+      client->data_bytes_to_write = strlen(client->data_write_buf);
       client->state = S_DATA_BUF;
       errno = 0;
       epoll_ctl(client->server->epollfd, EPOLL_CTL_MOD, client->data_fd,
@@ -642,6 +704,7 @@ void list_handler(ftp_client_t *client) {
         shutdown_all_data_connection(client);
         prepare_cntl_message_write(client, "451 Failed to list contents",
                                    S_RESPONSE_1);
+        goto case_cleanup_list_work_data;
       }
     case_cleanup_list_work_data:
       break;

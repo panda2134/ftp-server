@@ -21,4 +21,11 @@ void encode_pwd(const char* pathname, char* dest, size_t* result_len);
  */
 struct sockaddr* get_first_inet_addr_with_prefix(const char* prefix);
 
+/**
+ * generate EPLF line for stat info
+ * @param stat_info stat information of inode
+ * @return eplf status line. it is statically allocated in a shared buffer, and should not be freed.
+ */
+char* eplf_line(const char* filename, struct stat *stat_info);
+
 #endif //FTP_SERVER_UTILS_H
