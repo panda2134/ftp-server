@@ -1,6 +1,5 @@
 #include <stdio.h>
-#include <signal.h>
-#include <unistd.h>
+#include <string.h>
 #include <argp.h>
 #include <limits.h>
 #include "server.h"
@@ -52,7 +51,19 @@ int main(int argc, char **argv) {
   args.port = 21;
   strcpy(args.root, "/tmp/");
 
-  argp_parse(&(struct argp){ options, parse_opt, "", doc }, argc, argv, 0, 0, &args);
+  char** argv_copy = malloc(sizeof(char*) * argc);
+  for (int i = 0; i < argc; i++) {
+    ssize_t len = strlen(argv[i]);
+    argv_copy[i] = malloc(len + 5);
+    if (argv[i][0] == '-' && len > 2) {
+      strcpy(argv_copy[i], "-");
+      strcat(argv_copy[i], argv[i]);
+    } else {
+      strcpy(argv_copy[i], argv[i]);
+    }
+  }
+
+  argp_parse(&(struct argp){ options, parse_opt, "", doc }, argc, argv_copy, 0, 0, &args);
 
   puts("Launching FTP server...");
   server = create_ftp_server(args.port, args.root);
