@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <stdio.h>
+#include <fcntl.h>
 #include "client.h"
 #include "command.h"
 
@@ -14,7 +15,7 @@ void create_client(ftp_client_t* client, ftp_server_t* server) {
   client->state = S_INIT;
   client->mode = M_UNKNOWN;
   client->server = server;
-  strcpy(client->cwd, server->basepath);
+  strncpy(client->cwd, server->basepath, PATH_MAX);
 }
 
 void try_accept_pasv(ftp_client_t* client) {
@@ -32,11 +33,19 @@ void try_accept_pasv(ftp_client_t* client) {
       /* not an error; still waiting for a connection */
     }
   } else {
+    if (fcntl(client->data_fd, F_SETFL, O_NONBLOCK) == -1) {
+      perror("fcntl() when trying to accept a PASV connection");
+      shutdown(client->data_fd, SHUT_RDWR);
+      close(client->data_fd);
+      client->data_fd = -1;
+    }
+
     errno = 0;
     epoll_ctl(client->server->epollfd, EPOLL_CTL_ADD, client->data_fd,
               &(struct epoll_event){.data.ptr = client, .events = EPOLLIN});
     if (errno) {
       perror("epoll_ctl() when trying to accept a PASV connection");
+      shutdown(client->data_fd, SHUT_RDWR);
       close(client->data_fd);
       client->data_fd = -1;
     }
@@ -76,25 +85,22 @@ void update_client(ftp_client_t* client) {
       if (epoll_ctl(server->epollfd, EPOLL_CTL_DEL, client->cntl_fd, NULL) == -1) {
         perror("epoll_ctl() on cntl_fd in S_QUIT");
       }
-      if (close(client->cntl_fd) == -1) {
-        perror("close() on cntl_fd in S_QUIT");
-      }
+      if (shutdown(client->cntl_fd, SHUT_RDWR) == -1) perror("close() on cntl_fd in S_QUIT");
+      if (close(client->cntl_fd) == -1) perror("close() on cntl_fd in S_QUIT");
+
     }
     if (client->data_fd >= 0) {
-      if (epoll_ctl(server->epollfd, EPOLL_CTL_DEL, client->data_fd, NULL)) {
+      if (epoll_ctl(server->epollfd, EPOLL_CTL_DEL, client->data_fd, NULL))
         perror("epoll_ctl() on data_fd in S_QUIT");
-      }
-      if (close(client->data_fd) == -1) {
-        perror("close() on data_fd in S_QUIT");
-      }
+      if (shutdown(client->data_fd, SHUT_RDWR) == -1) perror("close() on data_fd in S_QUIT");
+      if (close(client->data_fd) == -1) perror("close() on data_fd in S_QUIT");
     }
     if (client->pasv_listen_fd >= 0) {
-      if (epoll_ctl(server->epollfd, EPOLL_CTL_DEL, client->pasv_listen_fd, NULL)) {
+      if (epoll_ctl(server->epollfd, EPOLL_CTL_DEL, client->pasv_listen_fd, NULL))
         perror("epoll_ctl() on pasv_listen_fd in S_QUIT");
-      }
-      if (close(client->pasv_listen_fd) == -1) {
+      if (shutdown(client->pasv_listen_fd, SHUT_RDWR) == -1) perror("close() on pasv_listen_fd in S_QUIT");
+      if (close(client->pasv_listen_fd) == -1)
         perror("close() on pasv_listen_fd in S_QUIT");
-      }
     }
     free(client);
 #pragma clang diagnostic push

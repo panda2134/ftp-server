@@ -103,7 +103,7 @@ void parse_command(ftp_client_t *client) {
     }
     /* 2. parse verb */
     for (int i = 0; i < UNKNOWN_VERB; i++) {
-      if (strcmp(current_verb, VERB_STR[i]) == 0) {
+      if (strncmp(current_verb, VERB_STR[i], BUF_SIZE) == 0) {
         client->verb = i;
         goto end;
       }
@@ -135,9 +135,9 @@ void execute_command(ftp_client_t *client) {
 
 void prepare_cntl_message_write_alt(ftp_client_t *client, const char *str, size_t len, int response_state) {
   memcpy(client->cntl_write_buf, str, len);
-  strcpy(client->cntl_write_buf + len, "\r\n");
+  strncpy(client->cntl_write_buf + len, "\r\n", BUF_SIZE);
   client->cntl_bytes_written = 0u;
-  client->cntl_bytes_to_write = strlen(client->cntl_write_buf);
+  client->cntl_bytes_to_write = strnlen(client->cntl_write_buf, BUF_SIZE);
 
   errno = 0;
   epoll_ctl(client->server->epollfd,
@@ -223,7 +223,7 @@ void type_handler(ftp_client_t *client) {
 void user_handler(ftp_client_t *client) {
   switch (client->state) {
     case S_WORK_RESPONSE_0:
-      if (strcmp(client->argument, "anonymous") == 0) {
+      if (strncmp(client->argument, "anonymous", 9) == 0) {
         prepare_cntl_message_write(client, "331 Guest login ok, send password.", S_RESPONSE_0);
       } else {
         prepare_cntl_message_write(client, "530 Invalid credential.", S_RESPONSE_0);
@@ -302,7 +302,7 @@ void cdup_handler(ftp_client_t *client) {
   switch (client->state) {
     case S_WORK_RESPONSE_0:
       realpath(client->cwd, path_buf);
-      strncat(path_buf, "/..", PATH_MAX);
+      strncat(path_buf, "/..", PATH_MAX-1);
       if (!is_valid_path(client->server, path_buf)) {
         prepare_cntl_message_write(client, "550 Path not allowed or malformed.", S_RESPONSE_0);
         goto case_cleanup_cwd;
@@ -349,10 +349,11 @@ void pwd_handler(ftp_client_t *client) {
   size_t encoded_len = 0u;
   switch (client->state) {
     case S_WORK_RESPONSE_0:
-      strcpy(message, "257 ");
+      strncpy(message, "257 ", BUF_SIZE);
       if (strncmp(client->server->basepath, client->cwd, PATH_MAX) != 0) {
         realpath(client->cwd, buf);
-        encode_pwd(buf + strlen(client->server->basepath), message + 4, &encoded_len); // "4" is for "257 "
+        encode_pwd(buf + strnlen(client->server->basepath, PATH_MAX),
+                   message + 4, &encoded_len); // "4" is for "257 "
       } else {
         encode_pwd("/", message + 4, &encoded_len); // "4" is for "250 "
       }
@@ -575,7 +576,7 @@ void pasv_handler(ftp_client_t *client) {
       if (!fail) {
         sprintf(message, "227 Entering Passive Mode (%u,%u,%u,%u,%u,%u).", h1, h2, h3, h4, p1, p2);
       } else {
-        strcpy(message, "550 Failed to create socket.");
+        strncpy(message, "550 Failed to create socket.", BUF_SIZE);
       }
       prepare_cntl_message_write(client, message, S_RESPONSE_0);
       break;
@@ -600,7 +601,7 @@ void list_handler(ftp_client_t *client) {
       } else if (client->mode == M_UNKNOWN) {
         prepare_cntl_message_write(client, "425 No data connection.", S_RESPONSE_1);
       } else {
-        strcpy(message, "150 Making a list.");
+        strncpy(message, "150 Making a list.", BUF_SIZE);
         if ((client->cur_dir_ptr = opendir(target)) == NULL && errno != ENOTDIR) { // NULL means Error or Is a file
           sprintf(message, "550 %s.", strerror(errno));
           prepare_cntl_message_write(client, message, S_RESPONSE_1);
@@ -644,7 +645,8 @@ void list_handler(ftp_client_t *client) {
         while (true) {
           client->cur_dir_ent = readdir(client->cur_dir_ptr);
           if (client->cur_dir_ent != NULL &&
-            (strcmp(".", client->cur_dir_ent->d_name) == 0 || strcmp("..", client->cur_dir_ent->d_name) == 0)
+            (strncmp(".", client->cur_dir_ent->d_name, FILENAME_SIZE) == 0
+            || strncmp("..", client->cur_dir_ent->d_name, FILENAME_SIZE) == 0)
             ) {
             continue;
           } else {
@@ -664,7 +666,7 @@ void list_handler(ftp_client_t *client) {
                                      S_RESPONSE_1);
           goto case_cleanup_list_work_data;
         }
-        strcpy(current_filename, client->cur_dir_ent->d_name);
+        strncpy(current_filename, client->cur_dir_ent->d_name, FILENAME_SIZE);
       } else {
         // only a file!
         strncpy(current_filename, basename(client->argument), FILENAME_SIZE);
@@ -683,15 +685,15 @@ void list_handler(ftp_client_t *client) {
                                      S_RESPONSE_1);
           goto case_cleanup_list_work_data;
         }
-        strcpy(client->data_write_buf, eplf_line(current_filename, &stat_info));
-        strcat(client->data_write_buf, "\r\n");
+        strncpy(client->data_write_buf, eplf_line(current_filename, &stat_info), BUF_SIZE);
+        strncat(client->data_write_buf, "\r\n", BUF_SIZE);
       } else {
-        strcpy(client->data_write_buf, current_filename);
-        strcat(client->data_write_buf, "\r\n");
+        strncpy(client->data_write_buf, current_filename, BUF_SIZE);
+        strncat(client->data_write_buf, "\r\n", BUF_SIZE);
       }
 
       client->data_bytes_written = 0u;
-      client->data_bytes_to_write = strlen(client->data_write_buf);
+      client->data_bytes_to_write = strnlen(client->data_write_buf, BUF_SIZE);
       client->state = S_DATA_BUF;
       errno = 0;
       epoll_ctl(client->server->epollfd, EPOLL_CTL_MOD, client->data_fd,
@@ -738,6 +740,7 @@ void list_handler(ftp_client_t *client) {
 
 void retr_stor_handler(ftp_client_t *client) {
   struct stat stat_info;
+  ssize_t read_len, delta;
   char path_buf[PATH_MAX], message[BUF_SIZE], read_buf[BUF_SIZE];
   switch (client->state) {
     case S_WORK_RESPONSE_0:
@@ -842,21 +845,19 @@ void retr_stor_handler(ftp_client_t *client) {
     case_cleanup_retr_work_data:
       break;
     case S_DATA_SENDFILE:
-      while (client->data_bytes_written < client->data_bytes_to_write) {
-        ssize_t delta = sendfile(client->data_fd, client->local_fd, NULL,
-                             client->data_bytes_to_write - client->data_bytes_written);
-        if (delta == -1) {
-          if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            goto case_cleanup_retr_stor_data_sendfile; // wait for next epoll
-          } else {
-            sprintf(message, "426 Data connection failure: %s.", strerror(errno));
-            shutdown_all_data_connection(client);
-            prepare_cntl_message_write(client, message, S_RESPONSE_1);
-            goto case_cleanup_retr_stor_data_sendfile;
-          }
+      delta = sendfile(client->data_fd, client->local_fd, NULL,
+                           client->data_bytes_to_write - client->data_bytes_written);
+      if (delta == -1) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+          goto case_cleanup_retr_stor_data_sendfile; // wait for next epoll
         } else {
-          client->data_bytes_written += delta;
+          sprintf(message, "426 Data connection failure: %s.", strerror(errno));
+          shutdown_all_data_connection(client);
+          prepare_cntl_message_write(client, message, S_RESPONSE_1);
+          goto case_cleanup_retr_stor_data_sendfile;
         }
+      } else {
+        client->data_bytes_written += delta;
       }
       if (client->data_bytes_written >= client->data_bytes_to_write) {
         shutdown_all_data_connection(client);
@@ -865,27 +866,25 @@ void retr_stor_handler(ftp_client_t *client) {
     case_cleanup_retr_stor_data_sendfile:
       break;
     case S_DATA_BUF:
-      while (true) {
-        ssize_t read_len = read(client->data_fd, read_buf, BUF_SIZE);
-        if (read_len == -1) {
-          if (errno != EAGAIN && errno != EWOULDBLOCK) {
-            // broken pipe
-            sprintf(message, "426 Data connection failure: %s.", strerror(errno));
-            prepare_cntl_message_write(client, message, S_RESPONSE_1);
-          }
-          goto case_cleanup_retr_stor_data_buf;
-        } else if (read_len == 0) {
-          // closed
+      read_len = read(client->data_fd, read_buf, BUF_SIZE);
+      if (read_len == -1) {
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+          // broken pipe
+          sprintf(message, "426 Data connection failure: %s.", strerror(errno));
+          prepare_cntl_message_write(client, message, S_RESPONSE_1);
+        }
+        goto case_cleanup_retr_stor_data_buf;
+      } else if (read_len == 0) {
+        // closed
+        shutdown_all_data_connection(client);
+        prepare_cntl_message_write(client, "226 Transfer complete.", S_RESPONSE_1);
+        goto case_cleanup_retr_stor_data_buf;
+      } else {
+        if (write(client->local_fd, read_buf, read_len) == -1) {
+          sprintf(message, "552 %s.", strerror(errno));
           shutdown_all_data_connection(client);
-          prepare_cntl_message_write(client, "226 Transfer complete.", S_RESPONSE_1);
+          prepare_cntl_message_write(client, message, S_RESPONSE_1);
           goto case_cleanup_retr_stor_data_buf;
-        } else {
-          if (write(client->local_fd, read_buf, read_len) == -1) {
-            sprintf(message, "552 %s.", strerror(errno));
-            shutdown_all_data_connection(client);
-            prepare_cntl_message_write(client, message, S_RESPONSE_1);
-            goto case_cleanup_retr_stor_data_buf;
-          }
         }
       }
     case_cleanup_retr_stor_data_buf:

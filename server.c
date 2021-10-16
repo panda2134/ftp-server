@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <string.h>
+#include <signal.h>
 #include "utils.h"
 #include "server.h"
 
@@ -66,6 +67,7 @@ ftp_server_t *create_ftp_server(int cntl_port, const char *basepath, const char 
 }
 
 _Noreturn void server_loop(ftp_server_t *server) {
+  signal(SIGPIPE, SIG_IGN);
   while (true) {
     server->num_closed = 0;
     server->num_event = epoll_wait(server->epollfd, server->events, MAX_EVENTS, -1);

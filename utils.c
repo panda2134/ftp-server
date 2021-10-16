@@ -112,7 +112,7 @@ const char * resolve_path_to_host(const char* basepath, const char* cwd, const c
     strncpy(buf, basepath, PATH_MAX);
   } else {
     strncpy(buf, cwd, PATH_MAX);
-    strncat(buf, "/", PATH_MAX);
+    strncat(buf, "/", PATH_MAX-1);
   }
   strncat(buf, pathname, PATH_MAX);
   return buf;
