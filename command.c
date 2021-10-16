@@ -774,7 +774,7 @@ void retr_stor_handler(ftp_client_t *client) {
           prepare_cntl_message_write(client, message, S_RESPONSE_1);
         } else {
           sprintf(message, "150 Opening BINARY mode data connection for %s (%ld bytes).",
-                  path_buf, stat_info.st_size);
+                  path_buf + strlen(client->server->basepath), stat_info.st_size);
           prepare_cntl_message_write(client, message, S_RESPONSE_0);
         }
       } else {
