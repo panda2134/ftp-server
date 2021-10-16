@@ -3,7 +3,6 @@
 
 #include <sys/epoll.h>
 #include <dirent.h>
-#include "hashtable.h"
 #include "global.h"
 #include "client.h"
 
@@ -13,12 +12,13 @@
 typedef struct ftp_server_t {
   struct epoll_event events[MAX_EVENTS];
   int num_event, epollfd, cntl_listen_fd;
-  int num_client;
+  int num_client, num_closed;
   struct sockaddr_in listen_addr;
   char basepath[PATH_MAX];
+  struct ftp_client_t * closed[MAX_CLIENT];
 } ftp_server_t;
 
-ftp_server_t* create_ftp_server(int cntl_port, const char* basepath);
+ftp_server_t* create_ftp_server(int cntl_port, const char* basepath, const char* if_prefix);
 bool is_valid_path(ftp_server_t* server, const char* path);
 _Noreturn void server_loop(ftp_server_t* server);
 

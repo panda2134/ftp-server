@@ -7,13 +7,15 @@
 
 struct arguments {
   int port;
-  char root[PATH_MAX];
+  char if_prefix[256], root[PATH_MAX];
 };
 
 static char doc[] = "A simple FTP server.";
 static struct argp_option options[] = {
     {"port", 'p', "PORT", 0, "The port that server listens on (default to 21)"},
-    {"root", 'r', "ROOT", 0, "The root area of the server."},
+    {"root", 'r', "ROOT", 0, "The root area of the server. (default to /tmp/)"},
+    {"interface", 'i', "INTERFACE", 0, "Interface (prefix) to which the server will listen"
+                                                                  "default to lo"},
     { 0 }
 };
 
@@ -40,6 +42,9 @@ static error_t parse_opt (int key, char *arg, struct argp_state *state) {
     case 'r':
       strcpy(rtn->root, arg);
       break;
+    case 'i':
+      strcpy(rtn->if_prefix, arg);
+      break;
     default:
       return ARGP_ERR_UNKNOWN;
   }
@@ -50,6 +55,7 @@ int main(int argc, char **argv) {
   struct arguments args;
   args.port = 21;
   strcpy(args.root, "/tmp/");
+  strcpy(args.if_prefix, INTERFACE_PREFIX);
 
   char** argv_copy = malloc(sizeof(char*) * argc);
   for (int i = 0; i < argc; i++) {
@@ -66,6 +72,6 @@ int main(int argc, char **argv) {
   argp_parse(&(struct argp){ options, parse_opt, "", doc }, argc, argv_copy, 0, 0, &args);
 
   puts("Launching FTP server...");
-  server = create_ftp_server(args.port, args.root);
+  server = create_ftp_server(args.port, args.root, args.if_prefix);
   server_loop(server);
 }

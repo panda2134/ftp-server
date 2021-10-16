@@ -55,19 +55,19 @@ char* eplf_line(const char* filename, struct stat *stat_info) {
   // parse last-modified time
   sprintf(buf, "m%lu,", stat_info->st_mtim.tv_sec);
   strcat(result, buf);
-  // parse size
-  sprintf(buf, "s%lu,", stat_info->st_size);
-  strcat(result, buf);
-  // parse r
-  if (S_ISREG(stat_info->st_mode)) {
-    strcat(result, "r,");
-  }
   // parse /
   if (S_ISDIR(stat_info->st_mode)) {
     strcat(result, "/,");
   }
+  // parse r
+  if (S_ISREG(stat_info->st_mode)) {
+    strcat(result, "r,");
+  }
+  // parse size
+  sprintf(buf, "s%lu,", stat_info->st_size);
+  strcat(result, buf);
   // filename
-  strcat(result, " ");
+  strcat(result, "\t");
   strcat(result, filename);
   return result;
 }

@@ -78,12 +78,6 @@
 		<Unit filename="/home/panda2134/Documents/ftp/ftp-server/command.h">
 			<Option target="server"/>
 		</Unit>
-		<Unit filename="/home/panda2134/Documents/ftp/ftp-server/hashtable.c">
-			<Option target="server"/>
-		</Unit>
-		<Unit filename="/home/panda2134/Documents/ftp/ftp-server/hashtable.h">
-			<Option target="server"/>
-		</Unit>
 		<Unit filename="/home/panda2134/Documents/ftp/ftp-server/main.c">
 			<Option target="server"/>
 		</Unit>

@@ -55,6 +55,7 @@ void update_client(ftp_client_t* client) {
       client->verb = INIT;
       client->state = S_WORK_RESPONSE_0;
       execute_command(client);
+
     case S_CMD:
       if (read_command_buf(client)) {
         parse_command(client);
@@ -87,7 +88,20 @@ void update_client(ftp_client_t* client) {
         perror("close() on data_fd in S_QUIT");
       }
     }
+    if (client->pasv_listen_fd >= 0) {
+      if (epoll_ctl(server->epollfd, EPOLL_CTL_DEL, client->pasv_listen_fd, NULL)) {
+        perror("epoll_ctl() on pasv_listen_fd in S_QUIT");
+      }
+      if (close(client->pasv_listen_fd) == -1) {
+        perror("close() on pasv_listen_fd in S_QUIT");
+      }
+    }
     free(client);
+#pragma clang diagnostic push
+#pragma ide diagnostic ignored "DanglingPointer"
+    // YES, client is freed, but we need to know all invalid pointers in the current poll round.
+    server->closed[server->num_closed++] = client;
+#pragma clang diagnostic pop
     server->num_client--;
   }
 }

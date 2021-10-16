@@ -1,8 +1,10 @@
 #include <unistd.h>
 #include <stdio.h>
+#include <string.h>
 #include <stdbool.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <assert.h>
 #include <sys/stat.h>
 #include <sys/sendfile.h>
 #include "command.h"
@@ -161,6 +163,7 @@ bool write_cntl_message(ftp_client_t *client, int work_state) {
         return false;
       } else {
         fprintf(stderr, "Error writing response: %s\n", strerror(errno));
+        client->state = S_QUIT;
         return false;
       }
     } else {
@@ -797,6 +800,11 @@ void retr_stor_handler(ftp_client_t *client) {
           perror("epoll_ctl() in LIST");
           shutdown_all_data_connection(client);
           prepare_cntl_message_write(client, "551 Internal server error.", S_RESPONSE_1);
+          break;
+        }
+      } else {
+        if (client->data_fd == -1) {
+          // still waiting for connection...
           break;
         }
       }
