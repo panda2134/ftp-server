@@ -20,14 +20,15 @@ void (*VERB_HANDLER[NUM_REQUEST_VERB])(ftp_client_t *) = {
     [RETR] = retr_stor_handler, [STOR] = retr_stor_handler, [TYPE] = type_handler, [PORT] = port_handler,
     [MKD] = mkd_handler, [CWD] = cwd_handler, [LIST] = list_handler, [NLST] = list_handler, [RMD] = rmd_handler,
     [RNFR] = rnfr_handler, [RNTO] = rnto_handler, [DELE] = dele_handler, [CDUP] = cdup_handler,
-    [UNKNOWN_VERB] = unknown_handler, [INIT] = init_handler
+    [UNKNOWN_VERB] = unknown_handler, [INIT] = init_handler, [FEAT] = feat_handler
 };
 
 const char *VERB_STR[NUM_REQUEST_VERB] = {
     [QUIT] = "QUIT", [ABOR] = "ABOR", [SYST] = "SYST", [PASV] = "PASV", [PWD] = "PWD",
     [USER] = "USER", [PASS] = "PASS", [RETR] = "RETR", [STOR] = "STOR", [TYPE] = "TYPE",
     [PORT] = "PORT", [MKD] = "MKD", [CWD] = "CWD", [LIST] = "LIST", [NLST] = "NLST", [RMD] = "RMD",
-    [RNFR] = "RNFR", [RNTO] = "RNTO", [DELE] = "DELE", [CDUP] = "CDUP", [UNKNOWN_VERB] = "", [INIT] = ""
+    [RNFR] = "RNFR", [RNTO] = "RNTO", [DELE] = "DELE", [CDUP] = "CDUP", [FEAT] = "FEAT",
+    [UNKNOWN_VERB] = "", [INIT] = ""
 };
 
 
@@ -197,6 +198,15 @@ void simple_response_handler(ftp_client_t *client, const char *response, int nex
       break;
     DEFAULT_MEANS_INVALID_STATE("simple_response_handler")
   }
+}
+
+void feat_handler(ftp_client_t *client) {
+  static const char features[] =
+      "211-Features\r\n"
+      " UTF8\r\n"
+      " PASV\r\n"
+      "211 End";
+  simple_response_handler(client, features, S_RESPONSE_END);
 }
 
 void quit_handler(ftp_client_t *client) {

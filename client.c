@@ -68,7 +68,6 @@ void update_client(ftp_client_t* client) {
     case S_CMD:
       if (read_command_buf(client)) {
         parse_command(client);
-        fprintf(stderr, "Got command: %s %s\n", VERB_STR[client->verb], client->argument);
         client->state = S_WORK_RESPONSE_0;
         execute_command(client);
       }
@@ -87,7 +86,6 @@ void update_client(ftp_client_t* client) {
       }
       if (shutdown(client->cntl_fd, SHUT_RDWR) == -1) perror("close() on cntl_fd in S_QUIT");
       if (close(client->cntl_fd) == -1) perror("close() on cntl_fd in S_QUIT");
-
     }
     if (client->data_fd >= 0) {
       if (epoll_ctl(server->epollfd, EPOLL_CTL_DEL, client->data_fd, NULL))
@@ -99,8 +97,7 @@ void update_client(ftp_client_t* client) {
       if (epoll_ctl(server->epollfd, EPOLL_CTL_DEL, client->pasv_listen_fd, NULL))
         perror("epoll_ctl() on pasv_listen_fd in S_QUIT");
       if (shutdown(client->pasv_listen_fd, SHUT_RDWR) == -1) perror("close() on pasv_listen_fd in S_QUIT");
-      if (close(client->pasv_listen_fd) == -1)
-        perror("close() on pasv_listen_fd in S_QUIT");
+      if (close(client->pasv_listen_fd) == -1) perror("close() on pasv_listen_fd in S_QUIT");
     }
     free(client);
 #pragma clang diagnostic push

@@ -6,7 +6,7 @@
 typedef enum request_verb {
   QUIT, ABOR, SYST, PASV, PWD,
   USER, PASS, RETR, STOR, TYPE, PORT, MKD, CWD,
-  LIST, NLST, RMD, RNFR, RNTO, DELE, CDUP,
+  LIST, NLST, RMD, RNFR, RNTO, DELE, CDUP, FEAT,
 
   UNKNOWN_VERB, INIT,
   NUM_REQUEST_VERB
@@ -31,6 +31,7 @@ void rnfr_handler(ftp_client_t *client);
 void rnto_handler(ftp_client_t *client);
 void dele_handler(ftp_client_t *client);
 void cdup_handler(ftp_client_t *client);
+void feat_handler(ftp_client_t *client);
 void retr_stor_handler(ftp_client_t *client);
 void unknown_handler(ftp_client_t *client);
 void init_handler(ftp_client_t *client);
