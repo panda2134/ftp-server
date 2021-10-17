@@ -61,7 +61,8 @@ int main(int argc, char **argv) {
   for (int i = 0; i < argc; i++) {
     ssize_t len = strlen(argv[i]);
     argv_copy[i] = malloc(len + 5);
-    if (argv[i][0] == '-' && len > 2) {
+    if (argv[i][0] == '-' && argv[i][1] != '-' 
+        && len > 2) {
       strcpy(argv_copy[i], "-");
       strcat(argv_copy[i], argv[i]);
     } else {

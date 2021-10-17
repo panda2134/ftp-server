@@ -222,7 +222,9 @@ void unknown_handler(ftp_client_t *client) {
 }
 
 void init_handler(ftp_client_t *client) {
-  simple_response_handler(client, "220 localhost FTP server ready.", S_RESPONSE_END);
+  char message[BUF_SIZE];
+  sprintf(message, "220 %s FTP server ready.", inet_ntoa(client->server->listen_addr.sin_addr));
+  simple_response_handler(client, message, S_RESPONSE_END);
 }
 
 void type_handler(ftp_client_t *client) {
