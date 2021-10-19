@@ -395,15 +395,21 @@ void pwd_handler(ftp_client_t *client) {
 void rnfr_handler(ftp_client_t *client) {
   struct stat stat_info;
   char path_buf[PATH_MAX];
+  const char* decoded;
   switch (client->state) {
     case S_WORK_RESPONSE_0:
-      strncpy(path_buf, resolve_path_to_host(client->server->basepath, client->cwd, client->argument), PATH_MAX);
+      decoded = decode_pathname(client->argument, client->arg_len);
+      if (decoded == NULL) {
+        prepare_cntl_message_write(client, "550 Path not allowed or malformed.", S_RESPONSE_0);
+        goto case_cleanup_rnfr;
+      }
+      strncpy(path_buf, resolve_path_to_host(client->server->basepath, client->cwd, decoded), PATH_MAX);
       if (!is_valid_path(client->server, path_buf)) {
         prepare_cntl_message_write(client, "550 Path not allowed or malformed.", S_RESPONSE_0);
         goto case_cleanup_rnfr;
       }
       errno = 0;
-      stat(client->argument, &stat_info);
+      stat(decoded, &stat_info);
       if (errno) {
         char *message = malloc(BUF_SIZE);
         sprintf(message, "550 %s.", strerror(errno));
@@ -424,19 +430,25 @@ void rnfr_handler(ftp_client_t *client) {
 void rnto_handler(ftp_client_t *client) {
   struct stat stat_info;
   char path_buf_new[PATH_MAX], path_buf_old[PATH_MAX];
+  const char* decoded;
   switch (client->state) {
     case S_WORK_RESPONSE_0:
       if (client->last_verb != RNFR || client->last_failed) {
         prepare_cntl_message_write(client, "503 Bad sequence of commands.", S_RESPONSE_0);
         break;
       }
-
+      decoded = decode_pathname(client->last_argument, client->last_arg_len);
       strncpy(path_buf_old,
-              resolve_path_to_host(client->server->basepath, client->cwd, client->last_argument),
+              resolve_path_to_host(client->server->basepath, client->cwd, decoded),
               PATH_MAX);
 
+      decoded = decode_pathname(client->argument, client->arg_len);
+      if (decoded == NULL) {
+        prepare_cntl_message_write(client, "550 Path not allowed or malformed.", S_RESPONSE_0);
+        goto case_cleanup_rnto;
+      }
       strncpy(path_buf_new,
-              resolve_path_to_host(client->server->basepath, client->cwd, client->argument),
+              resolve_path_to_host(client->server->basepath, client->cwd, decoded),
               PATH_MAX);
       if (!is_valid_path(client->server, path_buf_new)) {
         prepare_cntl_message_write(client, "550 Path not allowed or malformed.", S_RESPONSE_0);
