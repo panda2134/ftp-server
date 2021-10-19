@@ -62,9 +62,15 @@ bool read_command_buf(ftp_client_t *client) {
       if (buf[i] == '\r' && buf[i + 1] == '\n') { // found line termination
         memcpy(client->last_cmd, client->cur_cmd, sizeof(client->last_cmd));
         memcpy(client->last_argument, client->argument, sizeof(client->argument));
+
+        client->last_cmd_len = client->cmd_len;
+        client->last_arg_len = client->arg_len;
+
         client->last_verb = client->verb;
+
         memcpy(client->cur_cmd, buf, i * sizeof(char));
         client->cur_cmd[i] = '\0';
+        client->cmd_len = i;
 
         ssize_t offset = i + 2;
         for (ssize_t j = 0; j + offset < client->cntl_bytes_read; j++)
@@ -91,27 +97,29 @@ void parse_command(ftp_client_t *client) {
     client->argument[0] = '\0';
     return;
   } else {
-    char *current_verb = strndup(command, BUF_SIZE);
-    current_verb[verb_length] = '\0';
+    char *current_cmd = strndup(command, BUF_SIZE);
+    current_cmd[verb_length] = '\0';
 
     /* 1. parse argument */
     if (command[verb_length] == '\0') {
       /* verb with no arguments */
       client->argument[0] = '\0';
+      client->arg_len = -1; // no argument
     } else {
       /* command[verb_length] is a space, and an argument exists */
-      strncpy(client->argument, current_verb + verb_length + 1, BUF_SIZE);
+      strncpy(client->argument, current_cmd + verb_length + 1, BUF_SIZE);
+      client->arg_len = client->cmd_len - verb_length - 1;
     }
     /* 2. parse verb */
     for (int i = 0; i < UNKNOWN_VERB; i++) {
-      if (strncmp(current_verb, VERB_STR[i], BUF_SIZE) == 0) {
+      if (strncmp(current_cmd, VERB_STR[i], BUF_SIZE) == 0) {
         client->verb = i;
         goto end;
       }
     }
     client->verb = UNKNOWN_VERB;
     end:
-    free(current_verb);
+    free(current_cmd);
   }
 }
 
@@ -266,9 +274,15 @@ void pass_handler(ftp_client_t *client) {
 
 void fs_generic_handler_with_argument(ftp_client_t *client, int fn(const char *)) {
   char path_buf[PATH_MAX];
+  const char *decoded;
   switch (client->state) {
     case S_WORK_RESPONSE_0:
-      strncpy(path_buf, resolve_path_to_host(client->server->basepath, client->cwd, client->argument), PATH_MAX);
+      decoded = decode_pathname(client->argument, client->arg_len);
+      if (decoded == NULL) {
+        prepare_cntl_message_write(client, "550 Path not allowed or malformed.", S_RESPONSE_0);
+        goto case_cleanup_cwd;
+      }
+      strncpy(path_buf, resolve_path_to_host(client->server->basepath, client->cwd, decoded), PATH_MAX);
       if (!is_valid_path(client->server, path_buf)) {
         prepare_cntl_message_write(client, "550 Path not allowed or malformed.", S_RESPONSE_0);
         goto case_cleanup_cwd;
@@ -697,15 +711,22 @@ void list_handler(ftp_client_t *client) {
                                      S_RESPONSE_1);
           goto case_cleanup_list_work_data;
         }
-        strncpy(client->data_write_buf, eplf_line(current_filename, &stat_info), BUF_SIZE);
-        strncat(client->data_write_buf, "\r\n", BUF_SIZE);
+        size_t line_length = -1;
+        const char* res = eplf_line(current_filename, &stat_info, &line_length);
+        memcpy(client->data_write_buf, res, line_length);
+        assert(line_length != -1);
+        memcpy(client->data_write_buf + line_length, "\r\n", 2);
+        client->data_bytes_to_write = line_length + 2;
       } else {
+        size_t len = strlen(current_filename);
         strncpy(client->data_write_buf, current_filename, BUF_SIZE);
         strncat(client->data_write_buf, "\r\n", BUF_SIZE);
+        for (int i = 0; i < len; i++)
+          if (client->data_write_buf[i] == '\012') client->data_write_buf[i] = '\0';
+        client->data_bytes_to_write = len + 2;
       }
 
       client->data_bytes_written = 0u;
-      client->data_bytes_to_write = strnlen(client->data_write_buf, BUF_SIZE);
       client->state = S_DATA_BUF;
       errno = 0;
       epoll_ctl(client->server->epollfd, EPOLL_CTL_MOD, client->data_fd,
@@ -753,6 +774,7 @@ void list_handler(ftp_client_t *client) {
 void retr_stor_handler(ftp_client_t *client) {
   struct stat stat_info;
   ssize_t read_len, delta;
+  const char* decoded;
   char path_buf[PATH_MAX], message[BUF_SIZE], read_buf[BUF_SIZE];
   switch (client->state) {
     case S_WORK_RESPONSE_0:
@@ -761,7 +783,12 @@ void retr_stor_handler(ftp_client_t *client) {
         prepare_cntl_message_write(client, message, S_RESPONSE_1);
         goto case_cleanup_work_response_0;
       }
-      strncpy(path_buf, resolve_path_to_host(client->server->basepath, client->cwd, client->argument), PATH_MAX);
+      decoded = decode_pathname(client->argument, client->arg_len);
+      if (decoded == NULL) {
+        prepare_cntl_message_write(client, "550 Path not allowed or malformed.", S_RESPONSE_1);
+        goto case_cleanup_work_response_0;
+      }
+      strncpy(path_buf, resolve_path_to_host(client->server->basepath, client->cwd, decoded), PATH_MAX);
       if (!is_valid_path(client->server, path_buf)) {
         prepare_cntl_message_write(client, "550 Path not allowed or malformed.", S_RESPONSE_1);
         goto case_cleanup_work_response_0;
@@ -825,7 +852,8 @@ void retr_stor_handler(ftp_client_t *client) {
         prepare_cntl_message_write(client, message, S_RESPONSE_1);
         goto case_cleanup_retr_work_data;
       }
-      strncpy(path_buf, resolve_path_to_host(client->server->basepath, client->cwd, client->argument), PATH_MAX);
+      decoded = decode_pathname(client->argument, client->arg_len);
+      strncpy(path_buf, resolve_path_to_host(client->server->basepath, client->cwd, decoded), PATH_MAX);
       client->local_fd = open(path_buf,
                               client->verb == RETR ? O_RDONLY : O_CREAT | O_WRONLY, 0644);
       if (client->local_fd == -1) {

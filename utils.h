@@ -12,13 +12,20 @@
 #include "client.h"
 
 /**
- * encode the current directory string into a form that's suitable for ftp
+ * encode the current directory string into a form that's suitable for pwd
  * @param pathname the original pathname terminated by \000
  * @param dest destination of the encoded bytes
  * @param len length of encoded bytes
  */
 void encode_pwd(const char* pathname, char* dest, size_t* result_len);
 
+/**
+ * decode a given pathname, replacing \0 with \012
+ * @param encoded the encoded pathname
+ * @param length size of encoded path
+ * @return a pointer to statically allocated decoded string, or NULL to indicate an error.
+ */
+const char* decode_pathname(const char* encoded, size_t length);
 
 /**
  * get the first ip address whose the device name starts with a given prefix.
@@ -29,11 +36,11 @@ void encode_pwd(const char* pathname, char* dest, size_t* result_len);
 struct sockaddr* get_first_inet_addr_with_prefix(const char* prefix);
 
 /**
- * generate EPLF line for stat info
+ * generate EPLF line for stat info (returned filenames are encoded)
  * @param stat_info stat information of inode
  * @return eplf status line. it is statically allocated in a shared buffer, and shall not be freed.
  */
-char* eplf_line(const char* filename, struct stat *stat_info);
+char* eplf_line(const char* filename, struct stat *stat_info, size_t *return_len);
 
 /**
  * check if the given path is

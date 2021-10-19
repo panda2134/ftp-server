@@ -52,6 +52,8 @@ typedef struct ftp_client_t {
   int verb, last_verb;
   /** parsed argument pointer */
   char argument[BUF_SIZE + 1], last_argument[BUF_SIZE + 1];
+  /** lengths */
+  ssize_t cmd_len, last_cmd_len, arg_len, last_arg_len;
   /** whether the last command failed. */
   bool last_failed;
   /** cwd directory pointer for LIST */

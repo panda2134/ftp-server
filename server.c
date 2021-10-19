@@ -29,6 +29,10 @@ ftp_server_t *create_ftp_server(int cntl_port, const char *basepath, const char 
   }
   memset(&server->listen_addr, 0, sizeof(server->listen_addr));
   struct sockaddr_in *first_addr = (struct sockaddr_in *) get_first_inet_addr_with_prefix(if_prefix);
+  if (first_addr == NULL) {
+    fprintf(stderr, "Cannot find the requested interface");
+    exit(EXIT_FAILURE);
+  }
   server->listen_addr.sin_family = AF_INET;
   server->listen_addr.sin_port = htons(cntl_port);
   server->listen_addr.sin_addr.s_addr = first_addr->sin_addr.s_addr;

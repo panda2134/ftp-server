@@ -34,6 +34,19 @@ void encode_pwd(const char* pathname, char* dest, size_t* result_len) {
   *result_len = dest - original_dest;
 }
 
+const char* decode_pathname(const char* encoded, size_t length) {
+  static char buf[PATH_MAX];
+  if (length + 1 >= PATH_MAX) { // consider \0
+    return NULL;
+  }
+  memcpy(buf, encoded, length);
+  for (int i = 0; i < length; i++) {
+    if (buf[i] == '\0') buf[i] = '\012';
+  }
+  buf[length] = '\0';
+  return buf;
+}
+
 struct sockaddr* get_first_inet_addr_with_prefix(const char* prefix) {
   struct ifaddrs * ifaddr;
   if (getifaddrs(&ifaddr) == -1) {
@@ -54,8 +67,8 @@ struct sockaddr* get_first_inet_addr_with_prefix(const char* prefix) {
   return found ? ad : NULL;
 }
 
-char* eplf_line(const char* filename, struct stat *stat_info) {
-  static char result[BUFSIZ], buf[BUFSIZ]; // should be in all-zero
+char* eplf_line(const char* filename, struct stat *stat_info, size_t *return_len) {
+  static char result[BUF_SIZE], buf[BUF_SIZE]; // should be in all-zero
   strcpy(result, "+");
   // parse identifier
   sprintf(buf, "i%lu.%lu,", stat_info->st_dev, stat_info->st_ino);
@@ -76,7 +89,14 @@ char* eplf_line(const char* filename, struct stat *stat_info) {
   strcat(result, buf);
   // filename
   strcat(result, "\t");
-  strcat(result, filename);
+  size_t i, prefix_len = strlen(result);
+  for (i = 0; filename[i]; i++) {
+    if (filename[i] == '\012')
+      result[i + prefix_len] = '\0';
+    else
+      result[i + prefix_len] = filename[i];
+  }
+  *return_len = i + prefix_len;
   return result;
 }
 
